@@ -1,9 +1,10 @@
 numpy
-torch>=1.0
+torch>=1.2
 torchvision
 matplotlib
-tensorflow
-tensorboard<2.2.0
+tensorboard
 terminaltables
 pillow
 tqdm
+scikit-learn
+opencv-python >= 4.1

@@ -1,24 +1,20 @@
-from __future__ import division
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 import numpy as np
 
 from utils.parse_config import *
-from utils.utils import build_targets, to_cpu, non_max_suppression
-
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+from utils.utils import build_targets, to_cpu
+import utils.logger
 
 
-def create_modules(module_defs):
+def create_modules(module_defs, img_size: int):
     """
     Constructs module list of layer blocks from module configuration in module_defs
     """
-    hyperparams = module_defs.pop(0)
-    output_filters = [int(hyperparams["channels"])]
+    module_defs.pop(0)
+    filters = 0
+    output_filters = [3]
     module_list = nn.ModuleList()
     for module_i, module_def in enumerate(module_defs):
         modules = nn.Sequential()
@@ -28,29 +24,24 @@ def create_modules(module_defs):
             filters = int(module_def["filters"])
             kernel_size = int(module_def["size"])
             pad = (kernel_size - 1) // 2
-            modules.add_module(
-                f"conv_{module_i}",
-                nn.Conv2d(
-                    in_channels=output_filters[-1],
-                    out_channels=filters,
-                    kernel_size=kernel_size,
-                    stride=int(module_def["stride"]),
-                    padding=pad,
-                    bias=not bn,
-                ),
-            )
+            module = nn.Conv2d(in_channels=output_filters[-1],
+                               out_channels=filters,
+                               kernel_size=kernel_size,
+                               stride=int(module_def["stride"]),
+                               padding=pad,
+                               bias=not bn)
+            if module_i <= 74:
+                for param in module.parameters():
+                    param.requires_grad_(False)
+            modules.add_module(f"conv_{module_i}", module)
             if bn:
-                modules.add_module(f"batch_norm_{module_i}", nn.BatchNorm2d(filters, momentum=0.9, eps=1e-5))
+                module = nn.BatchNorm2d(filters, momentum=0.9, eps=1e-5)
+                if module_i <= 74:
+                    for param in module.parameters():
+                        param.requires_grad_(False)
+                modules.add_module(f"batch_norm_{module_i}", module)
             if module_def["activation"] == "leaky":
                 modules.add_module(f"leaky_{module_i}", nn.LeakyReLU(0.1))
-
-        elif module_def["type"] == "maxpool":
-            kernel_size = int(module_def["size"])
-            stride = int(module_def["stride"])
-            if kernel_size == 2 and stride == 1:
-                modules.add_module(f"_debug_padding_{module_i}", nn.ZeroPad2d((0, 1, 0, 1)))
-            maxpool = nn.MaxPool2d(kernel_size=kernel_size, stride=stride, padding=int((kernel_size - 1) // 2))
-            modules.add_module(f"maxpool_{module_i}", maxpool)
 
         elif module_def["type"] == "upsample":
             upsample = Upsample(scale_factor=int(module_def["stride"]), mode="nearest")
@@ -72,7 +63,7 @@ def create_modules(module_defs):
             anchors = [(anchors[i], anchors[i + 1]) for i in range(0, len(anchors), 2)]
             anchors = [anchors[i] for i in anchor_idxs]
             num_classes = int(module_def["classes"])
-            img_size = int(hyperparams["height"])
+            img_size = img_size
             # Define detection layer
             yolo_layer = YOLOLayer(anchors, num_classes, img_size)
             modules.add_module(f"yolo_{module_i}", yolo_layer)
@@ -80,7 +71,7 @@ def create_modules(module_defs):
         module_list.append(modules)
         output_filters.append(filters)
 
-    return hyperparams, module_list
+    return module_list
 
 
 class Upsample(nn.Module):
@@ -106,7 +97,7 @@ class EmptyLayer(nn.Module):
 class YOLOLayer(nn.Module):
     """Detection layer"""
 
-    def __init__(self, anchors, num_classes, img_dim=416):
+    def __init__(self, anchors, num_classes: int, img_dim: int):
         super(YOLOLayer, self).__init__()
         self.anchors = anchors
         self.num_anchors = len(anchors)
@@ -136,8 +127,6 @@ class YOLOLayer(nn.Module):
 
         # Tensors for cuda support
         FloatTensor = torch.cuda.FloatTensor if x.is_cuda else torch.FloatTensor
-        LongTensor = torch.cuda.LongTensor if x.is_cuda else torch.LongTensor
-        ByteTensor = torch.cuda.ByteTensor if x.is_cuda else torch.ByteTensor
 
         self.img_dim = img_dim
         num_samples = x.size(0)
@@ -145,37 +134,30 @@ class YOLOLayer(nn.Module):
 
         prediction = (
             x.view(num_samples, self.num_anchors, self.num_classes + 5, grid_size, grid_size)
-            .permute(0, 1, 3, 4, 2)
-            .contiguous()
+                .permute(0, 1, 3, 4, 2).contiguous()
         )
 
         # Get outputs
-        x = torch.sigmoid(prediction[..., 0])  # Center x
-        y = torch.sigmoid(prediction[..., 1])  # Center y
+        cx = torch.sigmoid(prediction[..., 0])  # Center x
+        cy = torch.sigmoid(prediction[..., 1])  # Center y
         w = prediction[..., 2]  # Width
         h = prediction[..., 3]  # Height
         pred_conf = torch.sigmoid(prediction[..., 4])  # Conf
         pred_cls = torch.sigmoid(prediction[..., 5:])  # Cls pred.
 
-        # If grid size does not match current we compute new offsets
-        if grid_size != self.grid_size:
-            self.compute_grid_offsets(grid_size, cuda=x.is_cuda)
+        self.compute_grid_offsets(grid_size, cuda=cx.is_cuda)
 
         # Add offset and scale with anchors
         pred_boxes = FloatTensor(prediction[..., :4].shape)
-        pred_boxes[..., 0] = x.data + self.grid_x
-        pred_boxes[..., 1] = y.data + self.grid_y
+        pred_boxes[..., 0] = cx.data + self.grid_x
+        pred_boxes[..., 1] = cy.data + self.grid_y
         pred_boxes[..., 2] = torch.exp(w.data) * self.anchor_w
         pred_boxes[..., 3] = torch.exp(h.data) * self.anchor_h
 
-        output = torch.cat(
-            (
-                pred_boxes.view(num_samples, -1, 4) * self.stride,
+        pred = (pred_boxes.view(num_samples, -1, 4) * self.stride,
                 pred_conf.view(num_samples, -1, 1),
-                pred_cls.view(num_samples, -1, self.num_classes),
-            ),
-            -1,
-        )
+                pred_cls.view(num_samples, -1, self.num_classes))
+        output = torch.cat(pred, -1)
 
         if targets is None:
             return output, 0
@@ -189,8 +171,8 @@ class YOLOLayer(nn.Module):
             )
 
             # Loss : Mask outputs to ignore non-existing objects (except with conf. loss)
-            loss_x = self.mse_loss(x[obj_mask], tx[obj_mask])
-            loss_y = self.mse_loss(y[obj_mask], ty[obj_mask])
+            loss_x = self.mse_loss(cx[obj_mask], tx[obj_mask])
+            loss_y = self.mse_loss(cy[obj_mask], ty[obj_mask])
             loss_w = self.mse_loss(w[obj_mask], tw[obj_mask])
             loss_h = self.mse_loss(h[obj_mask], th[obj_mask])
             loss_conf_obj = self.bce_loss(pred_conf[obj_mask], tconf[obj_mask])
@@ -234,12 +216,11 @@ class YOLOLayer(nn.Module):
 class Darknet(nn.Module):
     """YOLOv3 object detection model"""
 
-    def __init__(self, config_path, img_size=416):
+    def __init__(self, config_path: str, img_size: int):
         super(Darknet, self).__init__()
         self.module_defs = parse_model_config(config_path)
-        self.hyperparams, self.module_list = create_modules(self.module_defs)
+        self.module_list = create_modules(self.module_defs, img_size)
         self.yolo_layers = [layer[0] for layer in self.module_list if hasattr(layer[0], "metrics")]
-        self.img_size = img_size
         self.seen = 0
         self.header_info = np.array([0, 0, 0, self.seen, 0], dtype=np.int32)
 
@@ -251,10 +232,12 @@ class Darknet(nn.Module):
             if module_def["type"] in ["convolutional", "upsample", "maxpool"]:
                 x = module(x)
             elif module_def["type"] == "route":
-                x = torch.cat([layer_outputs[int(layer_i)] for layer_i in module_def["layers"].split(",")], 1)
+                cat = [layer_outputs[int(layer_i)] for layer_i in module_def["layers"].split(",")]
+                x = torch.cat(cat, 1)
             elif module_def["type"] == "shortcut":
-                layer_i = int(module_def["from"])
-                x = layer_outputs[-1] + layer_outputs[layer_i]
+                with torch.no_grad():
+                    layer_i = int(module_def["from"])
+                    x = layer_outputs[-1] + layer_outputs[layer_i]
             elif module_def["type"] == "yolo":
                 x, layer_loss = module[0](x, targets, img_dim)
                 loss += layer_loss
@@ -287,34 +270,36 @@ class Darknet(nn.Module):
                 if module_def["batch_normalize"]:
                     # Load BN bias, weights, running mean and running variance
                     bn_layer = module[1]
-                    num_b = bn_layer.bias.numel()  # Number of biases
+                    num_bn_biases = bn_layer.bias.numel()  # Number of biases
                     # Bias
-                    bn_b = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(bn_layer.bias)
-                    bn_layer.bias.data.copy_(bn_b)
-                    ptr += num_b
+                    bn_biases = torch.from_numpy(weights[ptr: ptr + num_bn_biases]).view_as(bn_layer.bias)
+                    bn_layer.bias.data.copy_(bn_biases)
+                    ptr += num_bn_biases
                     # Weight
-                    bn_w = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(bn_layer.weight)
-                    bn_layer.weight.data.copy_(bn_w)
-                    ptr += num_b
+                    bn_weights = torch.from_numpy(weights[ptr: ptr + num_bn_biases]).view_as(bn_layer.weight)
+                    bn_layer.weight.data.copy_(bn_weights)
+                    ptr += num_bn_biases
                     # Running Mean
-                    bn_rm = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(bn_layer.running_mean)
-                    bn_layer.running_mean.data.copy_(bn_rm)
-                    ptr += num_b
+                    bn_running_mean = torch.from_numpy(weights[ptr: ptr + num_bn_biases]).view_as(bn_layer.running_mean)
+                    bn_layer.running_mean.data.copy_(bn_running_mean)
+                    ptr += num_bn_biases
                     # Running Var
-                    bn_rv = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(bn_layer.running_var)
-                    bn_layer.running_var.data.copy_(bn_rv)
-                    ptr += num_b
+                    bn_running_var = torch.from_numpy(weights[ptr: ptr + num_bn_biases]).view_as(bn_layer.running_var)
+                    bn_layer.running_var.data.copy_(bn_running_var)
+                    ptr += num_bn_biases
                 else:
                     # Load conv. bias
-                    num_b = conv_layer.bias.numel()
-                    conv_b = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(conv_layer.bias)
-                    conv_layer.bias.data.copy_(conv_b)
-                    ptr += num_b
+                    num_biases = conv_layer.bias.numel()
+                    conv_biases = torch.from_numpy(weights[ptr: ptr + num_biases]).view_as(conv_layer.bias)
+                    conv_layer.bias.data.copy_(conv_biases)
+                    ptr += num_biases
+
                 # Load conv. weights
-                num_w = conv_layer.weight.numel()
-                conv_w = torch.from_numpy(weights[ptr : ptr + num_w]).view_as(conv_layer.weight)
-                conv_layer.weight.data.copy_(conv_w)
-                ptr += num_w
+                num_weights = conv_layer.weight.numel()
+                conv_weights = torch.from_numpy(weights[ptr: ptr + num_weights])
+                conv_weights = conv_weights.view_as(conv_layer.weight)
+                conv_layer.weight.data.copy_(conv_weights)
+                ptr += num_weights
 
     def save_darknet_weights(self, path, cutoff=-1):
         """
@@ -343,3 +328,14 @@ class Darknet(nn.Module):
                 conv_layer.weight.data.cpu().numpy().tofile(fp)
 
         fp.close()
+
+
+if __name__ == '__main__':
+    model = Darknet('config/yolov3.cfg', img_size=416)
+    print(model)
+    test = torch.rand([1, 3, 416, 416])
+    y = model(test)
+
+    logger = utils.logger.Logger('./logs')
+    logger.add_graph(model, test)
+    logger.close()
