@@ -8,7 +8,7 @@ from utils.utils import build_targets, to_cpu
 import utils.logger
 
 
-def create_modules(module_defs, img_size: int):
+def create_modules(device, module_defs, img_size: int):
     """
     Constructs module list of layer blocks from module configuration in module_defs
     """
@@ -65,7 +65,7 @@ def create_modules(module_defs, img_size: int):
             num_classes = int(module_def["classes"])
             img_size = img_size
             # Define detection layer
-            yolo_layer = YOLOLayer(anchors, num_classes, img_size)
+            yolo_layer = YOLOLayer(device, anchors, num_classes, img_size)
             modules.add_module(f"yolo_{module_i}", yolo_layer)
         # Register module list and number of output filters
         module_list.append(modules)
@@ -97,8 +97,9 @@ class EmptyLayer(nn.Module):
 class YOLOLayer(nn.Module):
     """Detection layer"""
 
-    def __init__(self, anchors, num_classes: int, img_dim: int):
+    def __init__(self, device, anchors, num_classes: int, img_dim: int):
         super(YOLOLayer, self).__init__()
+        self.device = device
         self.anchors = anchors
         self.num_anchors = len(anchors)
         self.num_classes = num_classes
@@ -117,9 +118,9 @@ class YOLOLayer(nn.Module):
         FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
         self.stride = self.img_dim / self.grid_size
         # Calculate offsets for each grid
-        self.grid_x = torch.arange(g).repeat(g, 1).view([1, 1, g, g]).type(FloatTensor)
-        self.grid_y = torch.arange(g).repeat(g, 1).t().view([1, 1, g, g]).type(FloatTensor)
-        self.scaled_anchors = FloatTensor([(a_w / self.stride, a_h / self.stride) for a_w, a_h in self.anchors])
+        self.grid_x = torch.arange(g).repeat(g, 1).view([1, 1, g, g]).type(FloatTensor).to(self.device)
+        self.grid_y = torch.arange(g).repeat(g, 1).t().view([1, 1, g, g]).type(FloatTensor).to(self.device)
+        self.scaled_anchors = FloatTensor([(a_w / self.stride, a_h / self.stride) for a_w, a_h in self.anchors], device=self.device)
         self.anchor_w = self.scaled_anchors[:, 0:1].view((1, self.num_anchors, 1, 1))
         self.anchor_h = self.scaled_anchors[:, 1:2].view((1, self.num_anchors, 1, 1))
 
@@ -148,7 +149,8 @@ class YOLOLayer(nn.Module):
         self.compute_grid_offsets(grid_size, cuda=cx.is_cuda)
 
         # Add offset and scale with anchors
-        pred_boxes = FloatTensor(prediction[..., :4].shape)
+        pred_boxes = FloatTensor(prediction[..., :4].shape, device=self.device)
+        pred_boxes.to(self.device)
         pred_boxes[..., 0] = cx.data + self.grid_x
         pred_boxes[..., 1] = cy.data + self.grid_y
         pred_boxes[..., 2] = torch.exp(w.data) * self.anchor_w
@@ -163,6 +165,7 @@ class YOLOLayer(nn.Module):
             return output, 0
         else:
             iou_scores, class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, tconf = build_targets(
+                device=self.device,
                 pred_boxes=pred_boxes,
                 pred_cls=pred_cls,
                 target=targets,
@@ -216,10 +219,11 @@ class YOLOLayer(nn.Module):
 class Darknet(nn.Module):
     """YOLOv3 object detection model"""
 
-    def __init__(self, config_path: str, img_size: int):
+    def __init__(self, device, config_path: str, img_size: int):
         super(Darknet, self).__init__()
+        self.device = device
         self.module_defs = parse_model_config(config_path)
-        self.module_list = create_modules(self.module_defs, img_size)
+        self.module_list = create_modules(device, self.module_defs, img_size)
         self.yolo_layers = [layer[0] for layer in self.module_list if hasattr(layer[0], "metrics")]
         self.seen = 0
         self.header_info = np.array([0, 0, 0, self.seen, 0], dtype=np.int32)
@@ -331,7 +335,8 @@ class Darknet(nn.Module):
 
 
 if __name__ == '__main__':
-    model = Darknet('config/yolov3.cfg', img_size=416)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = Darknet(device, 'config/yolov3.cfg', img_size=416)
     print(model)
     test = torch.rand([1, 3, 416, 416])
     y = model(test)

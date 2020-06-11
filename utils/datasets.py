@@ -37,6 +37,7 @@ def random_resize(images, min_size=288, max_size=448):
     images = F.interpolate(images, size=new_size, mode="nearest")
     return images
 
+
 def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10, border=0):
     # torchvision.transforms.RandomAffine(degrees=(-10, 10), translate=(.1, .1), scale=(.9, 1.1), shear=(-10, 10))
     # https://medium.com/uruvideo/dataset-augmentation-with-random-homographies-a8f4b44830d4
@@ -109,24 +110,6 @@ def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10,
         targets = torch.from_numpy(targets)
     return img, targets
 
-class ImageFolder(Dataset):
-    def __init__(self, folder_path, img_size=416):
-        self.files = sorted(glob.glob("%s/*.*" % folder_path))
-        self.img_size = img_size
-
-    def __getitem__(self, index):
-        img_path = self.files[index % len(self.files)]
-        # Extract image as PyTorch tensor
-        img = transforms.ToTensor()(Image.open(img_path))
-        # Pad to square resolution
-        img, _ = pad_to_square(img, 0)
-        # Resize
-        img = resize(img, self.img_size)
-
-        return img_path, img
-
-    def __len__(self):
-        return len(self.files)
 
 def augment_hsv(img, hgain=0.5, sgain=0.5, vgain=0.5):
     r = np.random.uniform(-1, 1, 3) * [hgain, sgain, vgain] + 1  # random gains
@@ -145,6 +128,26 @@ def augment_hsv(img, hgain=0.5, sgain=0.5, vgain=0.5):
     # if random.random() < 0.2:
     #     for i in range(3):
     #         img[:, :, i] = cv2.equalizeHist(img[:, :, i])
+
+
+class ImageFolder(Dataset):
+    def __init__(self, folder_path, img_size=416):
+        self.files = sorted(glob.glob("%s/*.*" % folder_path))
+        self.img_size = img_size
+
+    def __getitem__(self, index):
+        img_path = self.files[index % len(self.files)]
+        # Extract image as PyTorch tensor
+        img = transforms.ToTensor()(Image.open(img_path))
+        # Pad to square resolution
+        img, _ = pad_to_square(img, 0)
+        # Resize
+        img = resize(img, self.img_size)
+
+        return img_path, img
+
+    def __len__(self):
+        return len(self.files)
 
 
 class ListDataset(Dataset):
@@ -172,7 +175,6 @@ class ListDataset(Dataset):
             'scale': 0.05 * 0,  # image scale (+/- gain)
             'shear': 0.641 * 0
         }  # image shear (+/- deg)
-
 
     def __getitem__(self, index):
 

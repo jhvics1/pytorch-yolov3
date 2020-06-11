@@ -1,19 +1,15 @@
 import argparse
 import csv
-import os
 import time
-import tqdm
 
-import torch
 from torch.utils.data import DataLoader
-
 from models import *
 from utils.utils import *
 from utils.datasets import *
 from utils.parse_config import *
 
 
-def evaluate(model, path, iou_thres, conf_thres, nms_thres, img_size, batch_size, num_workers, args):
+def evaluate(model, path, iou_thres, conf_thres, nms_thres, img_size, batch_size, num_workers, device=None):
     model.eval()
 
     # Get dataloader
@@ -22,7 +18,8 @@ def evaluate(model, path, iou_thres, conf_thres, nms_thres, img_size, batch_size
         dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=dataset.collate_fn
     )
 
-    device = torch.device("cuda:{}".format(args.dev_id) if torch.cuda.is_available() else "cpu")
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     labels = []
     sample_metrics = []  # List of tuples (TP, confs, pred)
@@ -76,7 +73,7 @@ if __name__ == "__main__":
     class_names = load_classes(data_config["names"])
 
     # Initiate model
-    model = Darknet(args.model_def, img_size=args.img_size).to(device)
+    model = Darknet(device, args.model_def, img_size=args.img_size).to(device)
     if args.weights_path.endswith(".weights"):
         # Load darknet weights
         model.load_darknet_weights(args.weights_path)
@@ -94,7 +91,8 @@ if __name__ == "__main__":
         nms_thres=args.nms_thres,
         img_size=args.img_size,
         batch_size=args.batch_size,
-        num_workers=args.n_cpu
+        num_workers=args.n_cpu,
+        device=device
     )
 
     # Print AP and mAP.
