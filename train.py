@@ -113,6 +113,7 @@ if __name__ == "__main__":
     parser.add_argument("--multiscale_training", default=True, help="allow for multi-scale training")
     parser.add_argument("--iter_to_save", type=int, default=10, help="save checkpoint.pth every given iter.")
     parser.add_argument("--dev_id", default=0, help="GPU device id. Default 0")
+    parser.add_argument('--log_path', type=str, default='./logs', help='path for logging & monitoring')
     args = parser.parse_args()
     print(args)
 
@@ -134,7 +135,15 @@ if __name__ == "__main__":
     os.makedirs("checkpoints", exist_ok=True)
 
     # Tensorboard writer instantiation
-    logger = Logger("logs")
+    if args.pretrained_weight:
+        weight = "pretrained"
+    else:
+        weight = "scratch"
+    if args.augmentation:
+        aug = "aug_enabled"
+    else:
+        aug = "aug_disabled"
+    logger = Logger(os.path.join(args.log_path, str(args.img_size), weight, aug, str(args.batch_size)))
 
     # Get data configuration
     data_config = parse_data_config(args.data_config)
