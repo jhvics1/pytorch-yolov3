@@ -168,13 +168,17 @@ class ListDataset(Dataset):
         self.max_size = self.img_size + 3 * 32
         self.batch_count = 0
         self.hyp = {'hsv_h': 0.0138,  # image HSV-Hue augmentation (fraction)
-            'hsv_s': 0.678,  # image HSV-Saturation augmentation (fraction)
-            'hsv_v': 0.36,  # image HSV-Value augmentation (fraction)
-            'degrees': 1.98 * 0,  # image rotation (+/- deg)
-            'translate': 0.05 * 0,  # image translation (+/- fraction)
-            'scale': 0.05 * 0,  # image scale (+/- gain)
-            'shear': 0.641 * 0
-        }  # image shear (+/- deg)
+                    'hsv_s': 0.678,  # image HSV-Saturation augmentation (fraction)
+                    'hsv_v': 0.36,  # image HSV-Value augmentation (fraction)
+                    'degrees': 1.98 * 0,  # image rotation (+/- deg)
+                    'translate': 0.05 * 0,  # image translation (+/- fraction)
+                    'scale': 0.05 * 0,  # image scale (+/- gain)
+                    'shear': 0.641 * 0
+                    }  # image shear (+/- deg)
+        print(self.hyp['degrees'],
+              self.hyp['translate'],
+              self.hyp['scale'],
+              self.hyp['shear'])
 
     def __getitem__(self, index):
 
@@ -232,10 +236,11 @@ class ListDataset(Dataset):
                 img, targets = horisontal_flip(img, targets)
             if np.random.random() < 0.5:
                 img, targets = random_affine(img, targets,
-                                               degrees=self.hyp['degrees'],
-                                               translate=self.hyp['translate'],
-                                               scale=self.hyp['scale'],
-                                               shear=self.hyp['shear'])   
+                                             # degrees=self.hyp['degrees'],
+                                             # translate=self.hyp['translate'],
+                                             # scale=self.hyp['scale'],
+                                             # shear=self.hyp['shear']
+                                             )
         return img_path, img, targets
 
     def collate_fn(self, batch):

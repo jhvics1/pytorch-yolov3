@@ -25,20 +25,22 @@ def train(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     # Set learning rate scheduler
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=9, gamma=0.8)
-    metrics = ["grid_size",
-               "loss",
-               "x",
-               "y",
-               "w",
-               "h",
-               "conf",
-               "cls",
-               "cls_acc",
-               "recall50",
-               "recall75",
-               "precision",
-               "conf_obj",
-               "conf_noobj"]
+    # metrics = [
+    #     # "grid_size",
+    #     "loss",
+    #     # "x",
+    #     # "y",
+    #     # "w",
+    #     # "h",
+    #     # "conf",
+    #     # "cls",
+    #     # "cls_acc",
+    #     # "recall50",
+    #     # "recall75",
+    #     # "precision",
+    #     # "conf_obj",
+    #     # "conf_noobj"
+    # ]
     loss_log = tqdm.tqdm(total=0, position=2, bar_format='{desc}', leave=False)
     # Training code.
     for epoch in tqdm.tqdm(range(args.epochs), desc='Epoch'):
@@ -63,11 +65,11 @@ def train(args):
 
             # Tensorboard logging
             tensorboard_log = []
-            for i, yolo in enumerate(model.yolo_layers):
-                for name, metric in yolo.metrics.items():
-                    if name != "grid_size":
-                        tensorboard_log += [(f"{name}_{i + 1}", metric)]
-            tensorboard_log += [("loss", loss.item())]
+            # for i, yolo in enumerate(model.yolo_layers):
+            #     for name, metric in yolo.metrics.items():
+            #         if name != "grid_size":
+            #             tensorboard_log += [(f"{name}_{i + 1}", metric)]
+            tensorboard_log += [("train_loss", loss.item())]
             logger.list_of_scalars_summary(tensorboard_log, step)
 
             model.seen += imgs.size(0)
@@ -120,16 +122,16 @@ if __name__ == "__main__":
     device = torch.device("cuda:{}".format(args.dev_id) if torch.cuda.is_available() else "cpu")
 
     # Backup previous training results
-    if os.path.exists('checkpoints') or os.path.exists('logs'):
-        creation_time = os.listdir('logs')[0].split('.')[3]
+    if os.path.exists('checkpoints') or os.path.exists(args.log_path):
+        creation_time = os.listdir(args.log_path)[0].split('.')[3]
         creation_time = time.strftime('%y%m%d_%H%M%S', time.localtime(float(creation_time)))
         backup_dir = os.path.join('backup', creation_time)
         os.makedirs(backup_dir, exist_ok=True)
 
         if os.path.exists('checkpoints'):
             shutil.move('checkpoints', backup_dir)
-        if os.path.exists('logs'):
-            shutil.move('logs', backup_dir)
+        if os.path.exists(args.log_path):
+            shutil.move(args.log_path, backup_dir)
 
     # Make directory for saving checkpoint files
     os.makedirs("checkpoints", exist_ok=True)
