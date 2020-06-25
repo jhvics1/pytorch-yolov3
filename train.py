@@ -25,22 +25,22 @@ def train(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     # Set learning rate scheduler
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=9, gamma=0.8)
-    # metrics = [
-    #     # "grid_size",
-    #     "loss",
-    #     # "x",
-    #     # "y",
-    #     # "w",
-    #     # "h",
-    #     # "conf",
-    #     # "cls",
-    #     # "cls_acc",
-    #     # "recall50",
-    #     # "recall75",
-    #     # "precision",
-    #     # "conf_obj",
-    #     # "conf_noobj"
-    # ]
+    metrics = [
+        # "grid_size",
+        "loss",
+        # "x",
+        # "y",
+        # "w",
+        # "h",
+        # "conf",
+        # "cls",
+        # "cls_acc",
+        # "recall50",
+        # "recall75",
+        # "precision",
+        # "conf_obj",
+        # "conf_noobj"
+    ]
     loss_log = tqdm.tqdm(total=0, position=2, bar_format='{desc}', leave=False)
     # Training code.
     for epoch in tqdm.tqdm(range(args.epochs), desc='Epoch'):

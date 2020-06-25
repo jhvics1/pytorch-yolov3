@@ -175,10 +175,10 @@ class ListDataset(Dataset):
                     'scale': 0.05 * 0,  # image scale (+/- gain)
                     'shear': 0.641 * 0
                     }  # image shear (+/- deg)
-        print(self.hyp['degrees'],
-              self.hyp['translate'],
-              self.hyp['scale'],
-              self.hyp['shear'])
+        # print(self.hyp['degrees'],
+        #       self.hyp['translate'],
+        #       self.hyp['scale'],
+        #       self.hyp['shear'])
 
     def __getitem__(self, index):
 
@@ -234,12 +234,12 @@ class ListDataset(Dataset):
         if self.augment:
             if np.random.random() < 0.5:
                 img, targets = horisontal_flip(img, targets)
-            if np.random.random() < 0.5:
+            elif np.random.random() < 0.5:
                 img, targets = random_affine(img, targets,
                                              # degrees=self.hyp['degrees'],
-                                             # translate=self.hyp['translate'],
-                                             # scale=self.hyp['scale'],
-                                             # shear=self.hyp['shear']
+                                             translate=self.hyp['translate'],
+                                             scale=self.hyp['scale'],
+                                             shear=self.hyp['shear']
                                              )
         return img_path, img, targets
 
