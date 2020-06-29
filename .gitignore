@@ -12,4 +12,6 @@ __pycache__
 checkpoints
 .venv
 .idea
-
+.jpg
+.jpeg
+.bmp
