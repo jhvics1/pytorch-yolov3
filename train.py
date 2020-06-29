@@ -13,7 +13,9 @@ from test import evaluate
 def train(args):
     global metrics
     # Get dataloader
-    dataset = ListDataset(train_path, img_size=args.img_size, augment=args.augmentation,
+    dataset = ListDataset(train_path,
+                          img_size=args.img_size,
+                          augment=args.augmentation,
                           multiscale=args.multiscale_training)
     dataloader = torch.utils.data.DataLoader(dataset,
                                              batch_size=args.batch_size,

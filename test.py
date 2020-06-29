@@ -13,10 +13,15 @@ def evaluate(model, path, iou_thres, conf_thres, nms_thres, img_size, batch_size
     model.eval()
 
     # Get dataloader
-    dataset = ListDataset(path, img_size=img_size, augment=False, multiscale=False)
-    dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=dataset.collate_fn
-    )
+    dataset = ListDataset(path,
+                          img_size=img_size,
+                          augment=False,
+                          multiscale=False)
+    dataloader = torch.utils.data.DataLoader(dataset,
+                                             batch_size=batch_size,
+                                             shuffle=False,
+                                             num_workers=num_workers,
+                                             collate_fn=dataset.collate_fn)
 
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
